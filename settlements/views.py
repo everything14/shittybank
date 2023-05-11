@@ -1,8 +1,13 @@
 from django.http import JsonResponse
+from django.views.decorators.http import require_POST, require_GET
 from django.views.decorators.csrf import csrf_exempt
-from .models import Wallet, Settlement
 import decimal
+import json
 
+from .models import Wallet, Settlement
+
+
+@require_POST
 @csrf_exempt
 def create_wallet(request, id):
     try:
@@ -13,39 +18,44 @@ def create_wallet(request, id):
         wallet.save()
         return JsonResponse({'message': 'Wallet created successfully'})
 
+@require_POST
 @csrf_exempt
 def initiate_settlement(request):
-    if request.method == 'POST':
-        wallet_id = request.POST.get('wallet_id')
-        # print(wallet_id)
-        settlement_type = request.POST.get('type')
-        iban = request.POST.get('iban')
-        amount = request.POST.get('amount')
-        try:
-            wallet = Wallet.objects.get(id=wallet_id)
-        except Wallet.DoesNotExist:
-            return JsonResponse({'error': 'Wallet does not exist'})
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'})
+    wallet_id = data['wallet_id']
+    settlement_type = data['type']
+    iban = data['iban']
+    amount = data['amount']
 
-        if settlement_type == 'payin':
-            wallet.balance += decimal.Decimal(amount)
-            wallet.save()
-            settlement = Settlement(wallet=wallet, settlement_type='payin', iban=iban, amount=amount)
-            settlement.save()
-            return JsonResponse({'message': 'Pay-in initiated successfully'})
-        elif settlement_type == 'payout':
-            if wallet.balance < decimal.Decimal(amount):
-                return JsonResponse({'error': 'Insufficient funds'})
-            else:
-                wallet.balance -= decimal.Decimal(amount)
-                wallet.save()
-                settlement = Settlement(wallet=wallet, settlement_type='payout', iban=iban, amount=amount)
-                settlement.save()
-                return JsonResponse({'message': 'Pay-out initiated successfully'})
+    try:
+        wallet = Wallet.objects.get(id=wallet_id)
+    except Wallet.DoesNotExist:
+        return JsonResponse({'error': 'Wallet does not exist'})
+
+    if settlement_type == 'payin':
+        wallet.balance += decimal.Decimal(amount)
+        wallet.save()
+        settlement = Settlement(wallet=wallet, settlement_type='payin', iban=iban, amount=amount)
+        settlement.save()
+        return JsonResponse({'message': 'Pay-in initiated successfully'})
+    elif settlement_type == 'payout':
+        print(wallet.balance)
+        if wallet.balance < decimal.Decimal(amount):
+            return JsonResponse({'error': 'Insufficient funds'})
         else:
-            return JsonResponse({'error': 'Invalid settlement type'})
+            wallet.balance -= decimal.Decimal(amount)
+            print(wallet.balance)
+            wallet.save()
+            settlement = Settlement(wallet=wallet, settlement_type='payout', iban=iban, amount=amount)
+            settlement.save()
+            return JsonResponse({'message': 'Pay-out initiated successfully'})
     else:
-        return JsonResponse({'error': 'Invalid request method'})
+        return JsonResponse({'error': 'Invalid settlement type'})
 
+@require_GET
 def get_settlement_events(request, from_id):
     try:
         from_id_int = int(from_id)
